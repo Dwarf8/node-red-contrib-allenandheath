@@ -16,6 +16,7 @@ module.exports = {
                 faderLevel: require("./faderLevel.js").object(),
                 zoneSendMuteControl: require("./zoneSendMuteControl.js").object(),
                 zoneSendFaderLevel: require("./zoneSendFaderLevel.js").object(),
+                sceneRecall: require("./sceneRecall.js").object(),
             },
 
             //Reset this object
