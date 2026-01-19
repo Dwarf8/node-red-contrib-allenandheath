@@ -17,7 +17,8 @@
   "node-red": {
     "nodes": {
       "AHNetwork": "./AHNetwork/AHNetwork.js",
-      "MixRack": "./MixRack/MixRack.js"
+      "MixRack": "./MixRack/MixRack.js",
+      "AHNetwork-restart": "./AHNetworkRestart/AHNetwork-restart.js"
     }
   },
   "author": "Hayden Donald",
