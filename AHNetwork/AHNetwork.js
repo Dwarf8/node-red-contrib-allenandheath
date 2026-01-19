@@ -38,8 +38,19 @@ module.exports = function (RED) {
 
         /* ===== CONNECTION ===== */
         node.connect = function () {
-            if (!node.consoles[node.console]) {
-                node.error("Invalid console type");
+            node.log(`=== DEBUG: connect() start ===`);
+            node.log(`Console seleccionado: "${node.console}"`);
+            node.log(`Keys disponibles en object.consoles: ${Object.keys(node.consoles).join(", ")}`);
+
+            const consoleObj = node.consoles[node.console];
+
+            if (!consoleObj) {
+                node.error(`Console "${node.console}" no encontrada en object.consoles`);
+                return;
+            }
+
+            if (typeof consoleObj.initialConnection !== "function") {
+                node.error(`initialConnection NO es una función para la consola "${node.console}"`);
                 return;
             }
 
@@ -48,18 +59,31 @@ module.exports = function (RED) {
             node.server = new net.Socket();
 
             node.server.connect(node.port, node.ipAddress, function () {
-                const ok = node.consoles[node.console]
-                    .initialConnection(node.server, node.midiChannel);
-                node.connectionChanged(ok);
+                try {
+                    node.log(`=== DEBUG: connect callback ===`);
+                    node.log(`Intentando initialConnection para consola "${node.console}"`);
+
+                    const result = consoleObj.initialConnection(node.server, node.midiChannel);
+
+                    node.log(`Resultado de initialConnection: ${result}`);
+                    node.connectionChanged(result);
+
+                } catch (err) {
+                    node.error(`Error en connect callback: ${err.message}`, err);
+                }
             });
 
             node.server.on("data", function (data) {
-                const value = node.consoles[node.console]
-                    .recieve(data, node.midiChannel, node.server);
-                if (value && value !== true) node.sendMessage("any", value);
+                try {
+                    const value = consoleObj.recieve(data, node.midiChannel, node.server);
+                    if (value && value !== true) node.sendMessage("any", value);
+                } catch (err) {
+                    node.error(`Error en server.on("data"): ${err.message}`, err);
+                }
             });
 
-            node.server.on("error", function () {
+            node.server.on("error", function (err) {
+                node.error(`Socket error: ${err.message}`, err);
                 node.connectionChanged(false);
             });
         };
@@ -72,6 +96,7 @@ module.exports = function (RED) {
             node.connected = false;
             clearInterval(node.pingInterval);
             clearTimeout(node.reconnectionTimeout);
+            node.log("Disconnected / resources cleared");
         };
 
         /* ===== STATE ===== */
@@ -83,10 +108,14 @@ module.exports = function (RED) {
             if (state) {
                 node.log("Connected");
                 node.pingInterval = setInterval(() => {
-                    node.consoles[node.console]
-                        .sendPing(node.server, node.midiChannel, ok => {
-                            if (!ok) node.connectionChanged(false);
-                        });
+                    try {
+                        node.consoles[node.console]
+                            .sendPing(node.server, node.midiChannel, ok => {
+                                if (!ok) node.connectionChanged(false);
+                            });
+                    } catch (err) {
+                        node.error(`Error en sendPing: ${err.message}`, err);
+                    }
                 }, 10000);
             } else {
                 node.log("Disconnected");
@@ -99,24 +128,41 @@ module.exports = function (RED) {
 
         /* ===== COMMAND ===== */
         node.sendCommand = function (msg, sender) {
-            if (!node.connected) return;
+            if (!node.connected) {
+                node.log("sendCommand ignorado: nodo no conectado");
+                return;
+            }
 
-            const value = node.consoles[node.console]
-                .generatePacket(msg, node.server, node.midiChannel);
+            try {
+                const value = node.consoles[node.console]
+                    .generatePacket(msg, node.server, node.midiChannel);
 
-            if (value && value !== true) node.server.write(value);
+                if (value && value !== true) node.server.write(value);
+                node.log(`sendCommand ejecutado: ${JSON.stringify(msg)}`);
+            } catch (err) {
+                node.error(`Error en sendCommand: ${err.message}`, err);
+            }
         };
 
         /* ===== RESTART ===== */
         node.restart = function () {
             node.log("Restart requested");
+
             node.disconnect();
-            try { node.consoles[node.console].reset(); } catch (e) {}
-            setTimeout(() => node.connect(), 500);
+
+            try { node.consoles[node.console].reset(); } catch (e) {
+                node.error(`Error al resetear consola: ${e.message}`, e);
+            }
+
+            setTimeout(() => {
+                node.log("Reconnect tras restart...");
+                node.connect();
+            }, 500);
         };
 
         /* ===== CLOSE ===== */
         node.on("close", function () {
+            node.log("Node closing, cleaning resources...");
             node.disconnect();
         });
 
