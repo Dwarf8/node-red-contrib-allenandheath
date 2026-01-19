@@ -1,174 +1,194 @@
-const net = require("net");
-
-module.exports = function (RED) {
+const net = require('net');
+module.exports = function(RED) {
     function AHNetwork(config) {
         RED.nodes.createNode(this, config);
-        const node = this;
+        this.midiChannel = (config.midiChannel - 1).toString(16);
+        this.ipAddress = config.ipAddress;
+        this.port = config.port;
+        this.errorCallbacks = [];
+        this.successCallbacks = [];
+        this.messageCallbacks = [];
+        this.console = config.console;
+        this.server = undefined;
+        this.connected = false;
+        this.reconnectionTimeout = undefined;
+        this.pingInterval = undefined;
+        this.consoles = require("../functions/consoles.js").object();
+        var object = this;
 
-        node.ipAddress = config.ipAddress;
-        node.port = config.port;
-        node.console = config.console;
-        node.midiChannel = (config.midiChannel - 1).toString(16);
+        this.addErrorCallback = function(fn) {
+            this.errorCallbacks.push(fn);
+        },
+        this.addSuccessCallback = function(fn) {
+            this.successCallbacks.push(fn);
+        },  
+        this.addMessageCallback = function(fn) {
+            this.messageCallbacks.push(fn);
+        }
 
-        node.server = null;
-        node.connected = false;
-        node.reconnectionTimeout = null;
-        node.pingInterval = null;
+        //Attempt connection
+        this.connect = function() {
+            this.log("Attempting connection to Allen & Heath Console: " + config.console + " @ IP: " + config.ipAddress + ":" + config.port);
+            this.sendSuccess("any", "Connecting");
 
-        node.errorCallbacks = [];
-        node.successCallbacks = [];
-        node.messageCallbacks = [];
+            this.server = new net.Socket();
+            this.server.connect(this.port, this.ipAddress, function() {
+                object.connectionChanged(object.consoles[object.console].initialConnection(object.server, object.midiChannel));
+            });
 
-        node.consoles = require("../functions/consoles.js").object();
+            this.server.on("data", function(message) {
+                var callback = function(value) {
+                    if((typeof value === "string")) {
+                        //An Error Occurred
+                        object.error("Function Error: " + value);
+                        object.sendError("any", "Function error check debug");
+                    }
+                    else if(value != false && value != true && value != undefined){
+                        object.sendSuccess("any", "Got message!");
+                        object.sendMessage("any", value);
+                    }   
+                }
+                var value = object.consoles[object.console].recieve(message, object.midiChannel, object.server, callback);
+                callback(value);
 
-        /* ===== CALLBACKS ===== */
-        node.addErrorCallback = fn => node.errorCallbacks.push(fn);
-        node.addSuccessCallback = fn => node.successCallbacks.push(fn);
-        node.addMessageCallback = fn => node.messageCallbacks.push(fn);
+            });
 
-        function sendTo(list, a, b) {
-            list.forEach(fn => {
-                try { fn(a, b); } catch (e) {}
+            this.server.on("error", function(e) {
+                switch(e.code) {
+                    case "EADDRINUSE": {
+                        object.error("Critical Error: Socket In Use for Allen & Heath console: " + config.console + " @ IP: " + config.ipAddress + ":" + config.port);
+                        object.sendError("any", "Failed connection check debug!");
+                        object.connectionChanged(false, false);
+                        break;
+                    }
+                    case "EHOSTUNREACH": {
+                        object.error("Failed to reach Allen & Heath console: " + config.console + " @ IP: " + config.ipAddress + ":" + config.port);
+                        object.sendError("any", "Failed connection check debug!");
+                        object.connectionChanged(false);
+                        break;
+                    }
+                    case "ECONNRESET": {break;}
+                    default: {
+                        object.log("Some error occured with the socket, attempting to reconnect: " + e.code);
+                        object.sendError("any", "Disconnected");
+                        object.connectionChanged(false);
+                        break;
+                    }
+                }
             });
         }
 
-        node.sendError = (a, b) => sendTo(node.errorCallbacks, a, b);
-        node.sendSuccess = (a, b) => sendTo(node.successCallbacks, a, b);
-        node.sendMessage = (a, b) => sendTo(node.messageCallbacks, a, b);
+        //When the connection state has changed
+        this.connectionChanged = function(state, reconnect=true) {
+            if(object.connected != state) {
+                if(state == true) {
+                    object.connected = true;
+                    object.log("Connected");
+                    object.sendSuccess("any", "Connected");
+                    object.sendMessage("any", {"topic": "connectionState", "payload": "connected"});
 
-        /* ===== CONNECTION ===== */
-        node.connect = function () {
-            node.log(`=== DEBUG: connect() start ===`);
-            node.log(`Console seleccionado: "${node.console}"`);
-            node.log(`Keys disponibles en object.consoles: ${Object.keys(node.consoles).join(", ")}`);
-
-            const consoleObj = node.consoles[node.console];
-
-            if (!consoleObj) {
-                node.error(`Console "${node.console}" no encontrada en object.consoles`);
-                return;
-            }
-
-            if (typeof consoleObj.initialConnection !== "function") {
-                node.error(`initialConnection NO es una función para la consola "${node.console}"`);
-                return;
-            }
-
-            node.log(`Connecting to ${node.console} @ ${node.ipAddress}:${node.port}`);
-
-            node.server = new net.Socket();
-
-            node.server.connect(node.port, node.ipAddress, function () {
-                try {
-                    node.log(`=== DEBUG: connect callback ===`);
-                    node.log(`Intentando initialConnection para consola "${node.console}"`);
-
-                    const result = consoleObj.initialConnection(node.server, node.midiChannel);
-
-                    node.log(`Resultado de initialConnection: ${result}`);
-                    node.connectionChanged(result);
-
-                } catch (err) {
-                    node.error(`Error en connect callback: ${err.message}`, err);
+                    //Setup ping
+                    clearInterval(this.pingInterval);
+                    this.pingInterval = setInterval(function() {
+                        object.consoles[object.console].sendPing(object.server, object.midiChannel, function(success) {
+                            if(success == true) {
+                                object.sendSuccess("any", "Ping success");
+                            }
+                            else {
+                                object.sendError("any", "Ping failed");
+                                object.connectionChanged(false);
+                            }
+                        });
+                    }, 10000);
                 }
-            });
-
-            node.server.on("data", function (data) {
-                try {
-                    const value = consoleObj.recieve(data, node.midiChannel, node.server);
-                    if (value && value !== true) node.sendMessage("any", value);
-                } catch (err) {
-                    node.error(`Error en server.on("data"): ${err.message}`, err);
+                else {
+                    object.connected = false;
+                    object.server.destroy();
+                    clearInterval(object.pingInterval);
+                    object.log("Lost connection!");
+                    object.sendError("any", "Disconnected");
+                    object.sendMessage("any", {"topic": "connectionState", "payload": "disconnected"});
                 }
+            }
+
+            //Attempt reconnection
+            if(state == false && reconnect == true) {
+                if(object.reconnectionTimeout == undefined) {
+                    object.reconnectionTimeout = setTimeout(function() {
+                        clearTimeout(object.reconnectionTimeout);
+                        object.reconnectionTimeout = undefined;
+
+                        object.log("Attempting reconnection");
+                        object.sendError("any", "Attempting reconnection");
+                        object.sendMessage("any", {"topic": "connectionState", "payload": "reconnecting"});
+                        object.connect();
+                    }, 15000);
+                }
+
+                object.sendMessage("any", {"topic": "connectionState", "payload": "disconnected"});
+            }
+        }
+
+        //Send out error
+        this.sendError = function(sender,  message) {
+            for(i = 0; i < this.errorCallbacks.length; i++) {
+                this.errorCallbacks[i](sender, message);
+            }
+        }
+
+        //Send out success
+        this.sendSuccess =function(sender, message) {
+            for(i = 0; i < this.successCallbacks.length; i++) {
+                this.successCallbacks[i](sender, message);
+            }
+        }
+
+        //Send out error
+        this.sendMessage = function(sender,  message) {
+            for(i = 0; i < this.messageCallbacks.length; i++) {
+                this.messageCallbacks[i](sender, message);
+            }
+        }
+
+        //Send a command
+        this.sendCommand = function(msg, sender, network) {
+            var value = false;
+
+            value = object.consoles[object.console].generatePacket(msg, network.server, network.midiChannel, function(msg) {
+                object.sendMessage(sender, msg);
             });
-
-            node.server.on("error", function (err) {
-                node.error(`Socket error: ${err.message}`, err);
-                node.connectionChanged(false);
-            });
-        };
-
-        node.disconnect = function () {
-            if (node.server) {
-                try { node.server.destroy(); } catch (e) {}
+    
+            if((typeof value === "string")) {
+                object.error("Function Error: " + value);
+                object.sendError(sender, "Function Error: " + value);
             }
-            node.server = null;
-            node.connected = false;
-            clearInterval(node.pingInterval);
-            clearTimeout(node.reconnectionTimeout);
-            node.log("Disconnected / resources cleared");
-        };
-
-        /* ===== STATE ===== */
-        node.connectionChanged = function (state) {
-            if (node.connected === state) return;
-
-            node.connected = state;
-
-            if (state) {
-                node.log("Connected");
-                node.pingInterval = setInterval(() => {
-                    try {
-                        node.consoles[node.console]
-                            .sendPing(node.server, node.midiChannel, ok => {
-                                if (!ok) node.connectionChanged(false);
-                            });
-                    } catch (err) {
-                        node.error(`Error en sendPing: ${err.message}`, err);
-                    }
-                }, 10000);
-            } else {
-                node.log("Disconnected");
-                node.disconnect();
-                node.reconnectionTimeout = setTimeout(() => {
-                    node.connect();
-                }, 15000);
+            else if(value != false){
+                if(value != true) {
+                    object.server.write(value);
+                    object.sendSuccess(sender, "Sent!");
+                }
+                else {
+                    object.sendSuccess(sender, "Sent!");
+                }
             }
-        };
-
-        /* ===== COMMAND ===== */
-        node.sendCommand = function (msg, sender) {
-            if (!node.connected) {
-                node.log("sendCommand ignorado: nodo no conectado");
-                return;
+            else {
+                object.error("No Function Found");
+                object.sendError(sender, "Function Error: No Function Found");                  
             }
+        }
 
-            try {
-                const value = node.consoles[node.console]
-                    .generatePacket(msg, node.server, node.midiChannel);
-
-                if (value && value !== true) node.server.write(value);
-                node.log(`sendCommand ejecutado: ${JSON.stringify(msg)}`);
-            } catch (err) {
-                node.error(`Error en sendCommand: ${err.message}`, err);
-            }
-        };
-
-        /* ===== RESTART ===== */
-        node.restart = function () {
-            node.log("Restart requested");
-
-            node.disconnect();
-
-            try { node.consoles[node.console].reset(); } catch (e) {
-                node.error(`Error al resetear consola: ${e.message}`, e);
-            }
-
-            setTimeout(() => {
-                node.log("Reconnect tras restart...");
-                node.connect();
-            }, 500);
-        };
-
-        /* ===== CLOSE ===== */
-        node.on("close", function () {
-            node.log("Node closing, cleaning resources...");
-            node.disconnect();
+        //Events
+        this.on("close", function() {
+            this.server.destroy();
+            this.server = undefined;
+            this.consoles[this.console].reset();
+            this.connected = false;
+            clearInterval(object.pingInterval);
         });
 
-        /* ===== START ===== */
-        node.connect();
+        //Attempt connection
+        this.connect();
     }
 
     RED.nodes.registerType("allenandheath-AHNetwork", AHNetwork);
-};
+}
