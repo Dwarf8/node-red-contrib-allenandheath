@@ -3,7 +3,6 @@ const net = require("net");
 module.exports = function (RED) {
     function AHNetwork(config) {
         RED.nodes.createNode(this, config);
-
         const node = this;
 
         node.ipAddress = config.ipAddress;
@@ -22,8 +21,7 @@ module.exports = function (RED) {
 
         node.consoles = require("../functions/consoles.js").object();
 
-        /* ================= CALLBACKS ================= */
-
+        /* ===== CALLBACKS ===== */
         node.addErrorCallback = fn => node.errorCallbacks.push(fn);
         node.addSuccessCallback = fn => node.successCallbacks.push(fn);
         node.addMessageCallback = fn => node.messageCallbacks.push(fn);
@@ -38,8 +36,7 @@ module.exports = function (RED) {
         node.sendSuccess = (a, b) => sendTo(node.successCallbacks, a, b);
         node.sendMessage = (a, b) => sendTo(node.messageCallbacks, a, b);
 
-        /* ================= CONNECTION ================= */
-
+        /* ===== CONNECTION ===== */
         node.connect = function () {
             if (!node.consoles[node.console]) {
                 node.error("Invalid console type");
@@ -53,17 +50,13 @@ module.exports = function (RED) {
             node.server.connect(node.port, node.ipAddress, function () {
                 const ok = node.consoles[node.console]
                     .initialConnection(node.server, node.midiChannel);
-
                 node.connectionChanged(ok);
             });
 
             node.server.on("data", function (data) {
                 const value = node.consoles[node.console]
                     .recieve(data, node.midiChannel, node.server);
-
-                if (value && value !== true) {
-                    node.sendMessage("any", value);
-                }
+                if (value && value !== true) node.sendMessage("any", value);
             });
 
             node.server.on("error", function () {
@@ -77,13 +70,11 @@ module.exports = function (RED) {
             }
             node.server = null;
             node.connected = false;
-
             clearInterval(node.pingInterval);
             clearTimeout(node.reconnectionTimeout);
         };
 
-        /* ================= STATE ================= */
-
+        /* ===== STATE ===== */
         node.connectionChanged = function (state) {
             if (node.connected === state) return;
 
@@ -91,7 +82,6 @@ module.exports = function (RED) {
 
             if (state) {
                 node.log("Connected");
-
                 node.pingInterval = setInterval(() => {
                     node.consoles[node.console]
                         .sendPing(node.server, node.midiChannel, ok => {
@@ -101,50 +91,36 @@ module.exports = function (RED) {
             } else {
                 node.log("Disconnected");
                 node.disconnect();
-
                 node.reconnectionTimeout = setTimeout(() => {
                     node.connect();
                 }, 15000);
             }
         };
 
-        /* ================= COMMAND ================= */
-
+        /* ===== COMMAND ===== */
         node.sendCommand = function (msg, sender) {
             if (!node.connected) return;
 
             const value = node.consoles[node.console]
                 .generatePacket(msg, node.server, node.midiChannel);
 
-            if (value && value !== true) {
-                node.server.write(value);
-            }
+            if (value && value !== true) node.server.write(value);
         };
 
-        /* ================= RESTART (LO QUE QUERÍAS) ================= */
-
+        /* ===== RESTART ===== */
         node.restart = function () {
             node.log("Restart requested");
-
             node.disconnect();
-
-            try {
-                node.consoles[node.console].reset();
-            } catch (e) {}
-
-            setTimeout(() => {
-                node.connect();
-            }, 500);
+            try { node.consoles[node.console].reset(); } catch (e) {}
+            setTimeout(() => node.connect(), 500);
         };
 
-        /* ================= CLOSE ================= */
-
+        /* ===== CLOSE ===== */
         node.on("close", function () {
             node.disconnect();
         });
 
-        /* ================= START ================= */
-
+        /* ===== START ===== */
         node.connect();
     }
 
