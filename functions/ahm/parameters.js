@@ -91,7 +91,7 @@ module.exports = {
 
             // === Ping (dummy por ahora) ===
             sendPing: function (server, midiChannel, successFunction) {
-                if(successFunction) successFunction(false);
+                //if(successFunction) successFunction(false);
                 return false;
             },
 
