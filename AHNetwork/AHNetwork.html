@@ -1,76 +1,47 @@
-<!-- ===================== EDIT DIALOG ===================== -->
+
+<!-- Settings Panel -->
 <script type="text/x-red" data-template-name="allenandheath-AHNetwork">
     <div class="form-row">
-        <label for="node-input-name">
-            <i class="icon-tag"></i> Name
-        </label>
-        <input type="text" id="node-input-name" placeholder="Allen & Heath Network">
+        <label for="node-config-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" placeholder="Name">
     </div>
-
     <div class="form-row">
-        <label for="node-input-ipAddress">
-            <i class="icon-bookmark"></i> Mix Rack IP
-        </label>
-        <input type="text" id="node-input-ipAddress" placeholder="192.168.1.100">
+        <label for="node-config-input-ipAddress"><i class="icon-bookmark"></i> Mix Rack IP Address</label>
+        <input type="text" id="node-config-input-ipAddress">
     </div>
-
     <div class="form-row">
-        <label for="node-input-port">
-            <i class="icon-bookmark"></i> Port
-        </label>
-        <input type="number" id="node-input-port">
+        <label for="node-config-input-port"><i class="icon-bookmark"></i> Port</label>
+        <input type="text" id="node-config-input-port">
     </div>
-
     <div class="form-row">
-        <label for="node-input-console">
-            <i class="icon-tag"></i> Console
-        </label>
-        <select id="node-input-console">
+        <label for="node-config-input-console"><i class="icon-tag"></i> Console:</label>
+        <select id="node-config-input-console">
+            <option value=""></option>
             <option value="iLive">iLive</option>
             <option value="dLive">dLive</option>
             <option value="qu">QU</option>
             <option value="ahm">AHM</option>
         </select>
     </div>
-
     <div class="form-row">
-        <label for="node-input-midiChannel">
-            <i class="icon-bookmark"></i> MIDI Channel
-        </label>
-        <input type="number" id="node-input-midiChannel" min="1" max="16">
+        <label for="node-config-input-midiChannel"><i class="icon-bookmark"></i> Midi Channel</label>
+        <input type="text" id="node-config-input-midiChannel">
     </div>
 </script>
 
-<!-- ===================== HELP ===================== -->
-<script type="text/x-red" data-help-name="allenandheath-AHNetwork">
-    <p>
-        Nodo de red para consolas Allen & Heath.
-    </p>
-    <p>
-        <b>topic = restart</b> reinicia la conexión TCP.
-    </p>
-</script>
-
-<!-- ===================== REGISTER ===================== -->
+<!-- Register -->
 <script type="text/javascript">
     RED.nodes.registerType('allenandheath-AHNetwork', {
-        category: 'network',
-        color: '#c0deed',
-
+        category: 'config',
         defaults: {
-            name: { value: "" },
-            ipAddress: { value: "0.0.0.0", required: true },
-            port: { value: 51325, required: true, validate: RED.validators.number() },
-            console: { value: "ahm", required: true },
-            midiChannel: { value: 1, required: true, validate: RED.validators.number() }
+            name: {value: ""},
+            ipAddress: {value: "0.0.0.0", required: true},
+            port: {value: 51325, required: true, validate: RED.validators.number()},
+            console: {value: "", required: true},
+            midiChannel: {value: "", required: true}
         },
-
-        inputs: 1,
-        outputs: 1,
-        icon: "bridge.png",
-
-        label: function () {
-            return this.name || "Allen & Heath Network";
+        label: function() {
+            return this.name||"Allen & Heath Network";
         }
     });
 </script>
