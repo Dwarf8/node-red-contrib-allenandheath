@@ -6,10 +6,10 @@ module.exports = function (RED) {
 
         const node = this;
 
-        node.midiChannel = (config.midiChannel - 1).toString(16);
         node.ipAddress = config.ipAddress;
         node.port = config.port;
         node.console = config.console;
+        node.midiChannel = (config.midiChannel - 1).toString(16);
 
         node.server = null;
         node.connected = false;
@@ -28,11 +28,21 @@ module.exports = function (RED) {
         node.addSuccessCallback = fn => node.successCallbacks.push(fn);
         node.addMessageCallback = fn => node.messageCallbacks.push(fn);
 
+        function sendTo(list, a, b) {
+            list.forEach(fn => {
+                try { fn(a, b); } catch (e) {}
+            });
+        }
+
+        node.sendError = (a, b) => sendTo(node.errorCallbacks, a, b);
+        node.sendSuccess = (a, b) => sendTo(node.successCallbacks, a, b);
+        node.sendMessage = (a, b) => sendTo(node.messageCallbacks, a, b);
+
         /* ================= CONNECTION ================= */
 
         node.connect = function () {
             if (!node.consoles[node.console]) {
-                node.error("Console type not defined");
+                node.error("Invalid console type");
                 return;
             }
 
@@ -43,6 +53,7 @@ module.exports = function (RED) {
             node.server.connect(node.port, node.ipAddress, function () {
                 const ok = node.consoles[node.console]
                     .initialConnection(node.server, node.midiChannel);
+
                 node.connectionChanged(ok);
             });
 
@@ -60,6 +71,17 @@ module.exports = function (RED) {
             });
         };
 
+        node.disconnect = function () {
+            if (node.server) {
+                try { node.server.destroy(); } catch (e) {}
+            }
+            node.server = null;
+            node.connected = false;
+
+            clearInterval(node.pingInterval);
+            clearTimeout(node.reconnectionTimeout);
+        };
+
         /* ================= STATE ================= */
 
         node.connectionChanged = function (state) {
@@ -69,7 +91,6 @@ module.exports = function (RED) {
 
             if (state) {
                 node.log("Connected");
-                node.sendMessage("any", { topic: "connectionState", payload: "connected" });
 
                 node.pingInterval = setInterval(() => {
                     node.consoles[node.console]
@@ -79,14 +100,15 @@ module.exports = function (RED) {
                 }, 10000);
             } else {
                 node.log("Disconnected");
-                if (node.server) node.server.destroy();
-                clearInterval(node.pingInterval);
+                node.disconnect();
 
-                setTimeout(() => node.connect(), 5000);
+                node.reconnectionTimeout = setTimeout(() => {
+                    node.connect();
+                }, 15000);
             }
         };
 
-        /* ================= SEND ================= */
+        /* ================= COMMAND ================= */
 
         node.sendCommand = function (msg, sender) {
             if (!node.connected) return;
@@ -99,34 +121,29 @@ module.exports = function (RED) {
             }
         };
 
-        /* ================= INPUT ================= */
+        /* ================= RESTART (LO QUE QUERÍAS) ================= */
 
-        node.on("input", function (msg) {
-            if (msg.topic === "restart") {
-                node.log("Restart requested");
+        node.restart = function () {
+            node.log("Restart requested");
 
-                clearInterval(node.pingInterval);
-                clearTimeout(node.reconnectionTimeout);
+            node.disconnect();
 
-                if (node.server) node.server.destroy();
-                node.connected = false;
+            try {
+                node.consoles[node.console].reset();
+            } catch (e) {}
 
-                if (node.consoles[node.console]?.reset) {
-                    node.consoles[node.console].reset();
-                }
+            setTimeout(() => {
+                node.connect();
+            }, 500);
+        };
 
-                setTimeout(() => node.connect(), 500);
-                return;
-            }
-
-            node.sendCommand(msg, "input");
-        });
+        /* ================= CLOSE ================= */
 
         node.on("close", function () {
-            if (node.server) node.server.destroy();
-            clearInterval(node.pingInterval);
-            clearTimeout(node.reconnectionTimeout);
+            node.disconnect();
         });
+
+        /* ================= START ================= */
 
         node.connect();
     }
